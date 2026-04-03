@@ -49,6 +49,41 @@ function formatDiffLines(unified: string): Array<{ text: string; color: string }
   return result
 }
 
+/**
+ * Format a tool name and its input into a concise label for display.
+ * E.g., "Bash: ls -la", "Read: src/index.ts", "Glob: **\/*.tsx"
+ */
+function formatToolLabel(name: string, input: Record<string, unknown>, maxLen = 60): string {
+  let detail = ""
+
+  switch (name) {
+    case "Bash":
+      if (input.command) detail = String(input.command).slice(0, maxLen)
+      break
+    case "Read":
+    case "Write":
+    case "Edit":
+      if (input.filePath) detail = String(input.filePath)
+      break
+    case "Glob":
+      if (input.pattern) detail = String(input.pattern)
+      break
+    case "Grep":
+      if (input.pattern) detail = String(input.pattern)
+      break
+    case "WebFetch":
+      if (input.url) detail = String(input.url).slice(0, maxLen)
+      break
+    case "Task":
+      if (input.description) detail = String(input.description).slice(0, maxLen)
+      break
+    default:
+      break
+  }
+
+  return detail ? `${name}: ${detail}` : name
+}
+
 interface ChatProps {
   messages: ChatMessage[]
   streamingText: string
@@ -78,20 +113,7 @@ export function Chat({
         .map((activity) => (
           <Box key={activity.toolCallId} marginLeft={2}>
             <Text color="yellow">
-              ⏳ {activity.name}
-              {activity.name === "Bash" && activity.input.command
-                ? `: ${String(activity.input.command).slice(0, 60)}`
-                : activity.name === "Read" && activity.input.filePath
-                  ? `: ${String(activity.input.filePath)}`
-                  : activity.name === "Write" && activity.input.filePath
-                    ? `: ${String(activity.input.filePath)}`
-                    : activity.name === "Edit" && activity.input.filePath
-                      ? `: ${String(activity.input.filePath)}`
-                      : activity.name === "Glob" && activity.input.pattern
-                        ? `: ${String(activity.input.pattern)}`
-                        : activity.name === "Grep" && activity.input.pattern
-                          ? `: ${String(activity.input.pattern)}`
-                          : ""}
+              ⏳ {formatToolLabel(activity.name, activity.input)}
             </Text>
           </Box>
         ))}
@@ -132,16 +154,7 @@ export function Chat({
             {agent.activeTools.map((tool) => (
               <Box key={tool.toolCallId} marginLeft={4}>
                 <Text color="cyan" dimColor>
-                  ⏳ {tool.name}
-                  {tool.name === "Read" && tool.input.filePath
-                    ? `: ${String(tool.input.filePath)}`
-                    : tool.name === "Bash" && tool.input.command
-                      ? `: ${String(tool.input.command).slice(0, 50)}`
-                      : tool.name === "Glob" && tool.input.pattern
-                        ? `: ${String(tool.input.pattern)}`
-                        : tool.name === "Grep" && tool.input.pattern
-                          ? `: ${String(tool.input.pattern)}`
-                          : ""}
+                  ⏳ {formatToolLabel(tool.name, tool.input, 50)}
                 </Text>
               </Box>
             ))}
@@ -200,16 +213,7 @@ function MessageBlock({ message }: { message: ChatMessage }) {
         <Box flexDirection="column" marginLeft={2} marginTop={0}>
           {message.toolCalls.map((tc) => (
             <Text key={tc.id} dimColor>
-              ↳ {tc.name}
-              {tc.name === "Bash" && tc.input.command
-                ? `: ${String(tc.input.command).slice(0, 60)}`
-                : tc.name === "Read" && tc.input.filePath
-                  ? `: ${String(tc.input.filePath)}`
-                  : tc.name === "Write" && tc.input.filePath
-                    ? `: ${String(tc.input.filePath)}`
-                    : tc.name === "Edit" && tc.input.filePath
-                      ? `: ${String(tc.input.filePath)}`
-                      : ""}
+              ↳ {formatToolLabel(tc.name, tc.input)}
             </Text>
           ))}
         </Box>

@@ -16,6 +16,7 @@ import {
   type Session,
   type ContentBlock,
   type Skill,
+  type UpdateInfo,
 } from "@kumacode/core"
 
 export interface ChatMessage {
@@ -56,6 +57,8 @@ export function useKumaCode(options: KumaCodeOptions) {
   const [totalTokens, setTotalTokens] = useState(0)
   const [totalCost, setTotalCost] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [isUpdating, setIsUpdating] = useState(false)
 
   // Initialize KumaCode once
   useEffect(() => {
@@ -241,6 +244,29 @@ export function useKumaCode(options: KumaCodeOptions) {
       ])
     }
 
+    const onUpdateAvailable = (info: UpdateInfo) => {
+      setUpdateInfo(info)
+    }
+
+    const onUpdateStart = () => {
+      setIsUpdating(true)
+    }
+
+    const onUpdateDone = (data: { success: boolean; output: string; previousVersion: string; newVersion: string | null }) => {
+      setIsUpdating(false)
+      if (data.success && data.newVersion && data.newVersion !== data.previousVersion) {
+        // Clear the update notification and show a chat message
+        setUpdateInfo(null)
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: `[Auto-updated: v${data.previousVersion} -> v${data.newVersion}. Restart KumaCode to use the new version.]`,
+          },
+        ])
+      }
+    }
+
     bus.on("stream:event", onStreamEvent)
     bus.on("message:assistant", onAssistantMessage)
     bus.on("tool:start", onToolStart)
@@ -255,6 +281,9 @@ export function useKumaCode(options: KumaCodeOptions) {
     bus.on("subagent:end", onSubagentEnd)
     bus.on("subagent:tool", onSubagentTool)
     bus.on("context:compacted", onContextCompacted)
+    bus.on("update:available", onUpdateAvailable)
+    bus.on("update:start", onUpdateStart)
+    bus.on("update:done", onUpdateDone)
 
     return () => {
       bus.off("stream:event", onStreamEvent)
@@ -271,6 +300,9 @@ export function useKumaCode(options: KumaCodeOptions) {
       bus.off("subagent:end", onSubagentEnd)
       bus.off("subagent:tool", onSubagentTool)
       bus.off("context:compacted", onContextCompacted)
+      bus.off("update:available", onUpdateAvailable)
+      bus.off("update:start", onUpdateStart)
+      bus.off("update:done", onUpdateDone)
     }
   }, [])
 
@@ -424,6 +456,21 @@ export function useKumaCode(options: KumaCodeOptions) {
     return kumaRef.current.addMemory(text, scope)
   }, [])
 
+  const performUpdate = useCallback(async (): Promise<{
+    success: boolean
+    output: string
+    previousVersion: string
+    newVersion: string | null
+  } | null> => {
+    if (!kumaRef.current) return null
+    return kumaRef.current.performUpdate()
+  }, [])
+
+  const getVersion = useCallback((): string => {
+    if (!kumaRef.current) return "0.1.0"
+    return kumaRef.current.getVersion()
+  }, [])
+
   return {
     messages,
     streamingText,
@@ -456,5 +503,9 @@ export function useKumaCode(options: KumaCodeOptions) {
     getMemorySummary,
     learnFromConversation,
     addMemory,
+    updateInfo,
+    isUpdating,
+    performUpdate,
+    getVersion,
   }
 }

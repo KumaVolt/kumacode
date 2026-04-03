@@ -4,7 +4,7 @@ import { Command } from "commander"
 import { render } from "ink"
 import React from "react"
 import { App } from "@kumacode/tui"
-import { KumaCode, bus } from "@kumacode/core"
+import { KumaCode, bus, performSelfUpdate, checkForUpdates } from "@kumacode/core"
 import { runConnectWizard } from "./connect.js"
 
 const VERSION = "0.1.0"
@@ -83,6 +83,41 @@ program
   .description("Configure a model provider")
   .action(async () => {
     await runConnectWizard()
+  })
+
+// Subcommand: update
+program
+  .command("update")
+  .description("Update KumaCode to the latest version")
+  .option("-f, --force", "Force update check (ignore cache)")
+  .action(async (options) => {
+    console.log("Checking for updates...")
+
+    // First check if there's an update
+    const info = await checkForUpdates(VERSION, { force: options.force ?? true })
+    if (info && !info.updateAvailable) {
+      console.log(`KumaCode v${VERSION} is already up to date.`)
+      process.exit(0)
+    }
+
+    if (info) {
+      console.log(`Update available: v${info.currentVersion} -> v${info.latestVersion}`)
+    }
+
+    console.log("Updating...")
+    const result = await performSelfUpdate()
+
+    if (result.success) {
+      if (result.newVersion && result.newVersion !== result.previousVersion) {
+        console.log(`\nUpdated successfully: v${result.previousVersion} -> v${result.newVersion}`)
+        console.log("Restart KumaCode to use the new version.")
+      } else {
+        console.log(`\n${result.output}`)
+      }
+    } else {
+      console.error(`\nUpdate failed:\n${result.output}`)
+      process.exit(1)
+    }
   })
 
 program.parse()

@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from "react"
+import React, { useEffect, useState, useCallback, useMemo } from "react"
 import { Box, useApp, useInput } from "ink"
 import { Banner } from "./components/banner.js"
 import { Chat } from "./components/chat.js"
-import { Input } from "./components/input.js"
+import { Input, type SlashCommand } from "./components/input.js"
 import { StatusBar } from "./components/status-bar.js"
 import { PermissionDialog, type PermissionRequest } from "./components/permission-dialog.js"
 import { useKumaCode } from "./hooks/use-kumacode.js"
@@ -90,6 +90,40 @@ export function App({
     }
   })
 
+  // Build slash command list for autocomplete (memoized)
+  const slashCommands: SlashCommand[] = useMemo(() => {
+    const builtinCommands: SlashCommand[] = [
+      { name: "help", description: "Show all commands" },
+      { name: "clear", description: "Clear conversation" },
+      { name: "model", description: "List or switch models" },
+      { name: "mode", description: "Cycle permission mode" },
+      { name: "connect", description: "Show providers and models" },
+      { name: "sessions", description: "List, resume, or delete sessions" },
+      { name: "compact", description: "Compact context (summarize)" },
+      { name: "undo", description: "Undo last file change" },
+      { name: "memory", description: "View or manage learned conventions" },
+      { name: "skills", description: "List available skills" },
+      { name: "update", description: "Update KumaCode to latest version" },
+      { name: "quit", description: "Exit KumaCode" },
+    ]
+
+    // Add dynamic skill names
+    const skills = kuma.listSkills()
+    for (const skill of skills) {
+      builtinCommands.push({
+        name: skill.name,
+        description: skill.description.slice(0, 60),
+      })
+    }
+
+    return builtinCommands
+  }, [kuma])
+
+  // Get recent sessions for the banner
+  const recentSessions = useMemo(() => {
+    return kuma.listSessions(5)
+  }, [kuma])
+
   const handleSubmit = useCallback((text: string) => {
     // Slash commands
     if (text.startsWith("/")) {
@@ -116,6 +150,7 @@ export function App({
             "  /undo       — undo the last file change\n" +
             "  /memory     — view or manage learned conventions\n" +
             "  /skills     — list available skills\n" +
+            "  /update     — update KumaCode to the latest version\n" +
             "  /quit       — exit KumaCode" +
             skillHelp
           )
@@ -270,6 +305,30 @@ export function App({
           }
           return
         }
+        case "update": {
+          kuma.addLocalMessage("Checking for updates and updating KumaCode...")
+          kuma.performUpdate().then((result) => {
+            if (!result) {
+              kuma.addLocalMessage("Update check failed: KumaCode not initialized.")
+              return
+            }
+            if (result.success) {
+              if (result.newVersion && result.newVersion !== result.previousVersion) {
+                kuma.addLocalMessage(
+                  `Updated successfully: v${result.previousVersion} -> v${result.newVersion}\n\n` +
+                  "Restart KumaCode to use the new version."
+                )
+              } else {
+                kuma.addLocalMessage(result.output)
+              }
+            } else {
+              kuma.addLocalMessage(`Update failed:\n${result.output}`)
+            }
+          }).catch((err) => {
+            kuma.addLocalMessage(`Update failed: ${err instanceof Error ? err.message : String(err)}`)
+          })
+          return
+        }
         case "sessions": {
           if (!arg) {
             // List recent sessions
@@ -360,6 +419,7 @@ export function App({
   }, [kuma, exit])
 
   const hasMessages = kuma.messages.length > 0
+  const hasActiveSubagent = kuma.subagentActivities.some((a) => a.status === "running")
 
   return (
     <Box flexDirection="column" width="100%">
@@ -367,6 +427,9 @@ export function App({
         <Banner
           cwd={cwd}
           model={kuma.model ?? undefined}
+          version={kuma.getVersion()}
+          updateInfo={kuma.updateInfo}
+          recentSessions={recentSessions}
         />
       )}
       <Chat
@@ -383,12 +446,17 @@ export function App({
       <Input
         onSubmit={handleSubmit}
         disabled={kuma.isStreaming || !!pendingPermission}
+        commands={slashCommands}
       />
       <StatusBar
         model={kuma.model ?? undefined}
         mode={kuma.permissionMode}
         tokens={kuma.totalTokens}
         cost={kuma.totalCost}
+        undoCount={kuma.getUndoCount()}
+        hasSubagent={hasActiveSubagent}
+        updateAvailable={!!kuma.updateInfo?.updateAvailable}
+        isUpdating={kuma.isUpdating}
       />
     </Box>
   )

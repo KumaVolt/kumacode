@@ -36,6 +36,8 @@ export const SettingsSchema = z.object({
   vimMode: z.boolean().default(false),
   /** Extended thinking enabled */
   thinkingEnabled: z.boolean().default(false),
+  /** Auto-check for updates on startup */
+  checkForUpdates: z.boolean().default(true),
 })
 
 export type Settings = z.infer<typeof SettingsSchema>

@@ -46,6 +46,7 @@ import { createOllamaProvider } from "./provider/ollama.js"
 import { createCompatibleProvider } from "./provider/compatible.js"
 import { createZhipuProvider } from "./provider/zhipu.js"
 import { createChatGPTProvider } from "./provider/openai-chatgpt.js"
+import { checkForUpdates, performSelfUpdate, type UpdateInfo } from "./update/update.js"
 
 const VERSION = "0.1.0"
 
@@ -208,8 +209,34 @@ export class KumaCode {
     // Set active provider/model from settings or override
     this.applyActiveModel()
 
+    // Non-blocking auto-update — check for updates, then auto-apply in background
+    if (this.settings.checkForUpdates) {
+      this.backgroundAutoUpdate()
+    }
+
     this.initialized = true
     this.initPromise = null
+  }
+
+  /**
+   * Background auto-update: check for a new version and auto-apply it.
+   * Runs entirely in the background — never blocks init() or send().
+   * Emits bus events so the TUI can show a notification when done.
+   */
+  private backgroundAutoUpdate(): void {
+    checkForUpdates(VERSION)
+      .then((info) => {
+        if (!info?.updateAvailable) return
+
+        // New version found — auto-apply
+        bus.emit("update:start", undefined)
+        return performSelfUpdate().then((result) => {
+          bus.emit("update:done", result)
+        })
+      })
+      .catch(() => {
+        // Silently ignore — auto-update is best-effort
+      })
   }
 
   /**
@@ -548,6 +575,35 @@ export class KumaCode {
       return appendUserMemory(text)
     }
     return appendProjectMemory(this.cwd, text)
+  }
+
+  /**
+   * Force an update check right now (ignores cache).
+   * Returns the update info if a check was performed, or null on failure.
+   */
+  async checkForUpdatesNow(): Promise<UpdateInfo | null> {
+    return checkForUpdates(VERSION, { force: true })
+  }
+
+  /**
+   * Perform a self-update: git pull + bun install in the install directory.
+   * Emits "update:start" and "update:done" bus events.
+   */
+  async performUpdate(): Promise<{
+    success: boolean
+    output: string
+    previousVersion: string
+    newVersion: string | null
+  }> {
+    bus.emit("update:start", undefined)
+    const result = await performSelfUpdate()
+    bus.emit("update:done", result)
+    return result
+  }
+
+  /** Get the current KumaCode version */
+  getVersion(): string {
+    return VERSION
   }
 
   /** Known image file extensions */

@@ -1,6 +1,7 @@
 import mitt from "mitt"
 import type { Message, StreamEvent, ModelConfig } from "../provider/base.js"
 import type { ToolOutput } from "../tool/base.js"
+import type { UpdateInfo } from "../update/update.js"
 
 /** Represents a file modification that can be undone */
 export interface FileBackup {
@@ -63,6 +64,12 @@ export type BusEvents = {
     input: Record<string, unknown>
     status: "start" | "done" | "error" | "denied"
   }
+  /** A newer version is available */
+  "update:available": UpdateInfo
+  /** Self-update started */
+  "update:start": undefined
+  /** Self-update completed */
+  "update:done": { success: boolean; output: string; previousVersion: string; newVersion: string | null }
 }
 
 export const bus = mitt<BusEvents>()
