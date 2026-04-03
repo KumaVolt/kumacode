@@ -7,14 +7,27 @@ export interface Message {
   toolResults?: ToolResult[]
 }
 
+export interface ImageSource {
+  type: "base64" | "url"
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+  /** Base64-encoded data (when type === "base64") */
+  data?: string
+  /** URL of the image (when type === "url") */
+  url?: string
+}
+
 export interface ContentBlock {
-  type: "text" | "tool_use" | "tool_result"
+  type: "text" | "tool_use" | "tool_result" | "image"
   text?: string
   toolCallId?: string
   toolName?: string
   input?: Record<string, unknown>
   output?: string
   isError?: boolean
+  /** Image source data (when type === "image") */
+  imageSource?: ImageSource
+  /** Human-readable label for the image (filename, description, etc.) */
+  imageLabel?: string
 }
 
 export interface ToolCall {
@@ -51,6 +64,7 @@ export interface ModelConfig {
   maxOutput: number
   supportsToolUse: boolean
   supportsStreaming: boolean
+  supportsVision?: boolean
   inputPricePer1M?: number
   outputPricePer1M?: number
 }

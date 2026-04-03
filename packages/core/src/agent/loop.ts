@@ -4,6 +4,7 @@ import { toolRegistry } from "../tool/registry.js"
 import type { ToolContext, ToolOutput } from "../tool/base.js"
 import { bus } from "../bus/bus.js"
 import { generateId } from "../util/id.js"
+import { estimateTokens, compactMessages } from "./context.js"
 
 export interface AgentLoopOptions {
   /** Working directory for tool execution */
@@ -47,6 +48,26 @@ export async function runAgentLoop(
   try {
     for (let round = 0; round < maxRounds; round++) {
       if (options.abortSignal?.aborted) break
+
+      // Context window management: compact if approaching the limit
+      // Threshold is configurable via KUMACODE_AUTOCOMPACT_PCT env var (default 80)
+      const estimatedTokens = estimateTokens(allMessages)
+      const autoCompactPct = parseInt(process.env.KUMACODE_AUTOCOMPACT_PCT ?? "80", 10)
+      const compactionThreshold = Math.floor(model.contextWindow * (Math.min(95, Math.max(50, autoCompactPct)) / 100))
+      if (estimatedTokens > compactionThreshold) {
+        const before = allMessages.length
+        const compacted = await compactMessages(allMessages, compactionThreshold, {
+          provider,
+          modelId: model.id,
+        })
+        allMessages.length = 0
+        allMessages.push(...compacted)
+        // context:compacted is emitted inside compactMessages, but we also
+        // emit agent-level info if compaction actually removed messages
+        if (compacted.length < before) {
+          bus.emit("context:compacted", { removedCount: before - compacted.length, method: "auto" })
+        }
+      }
 
       const toolDefs = tools.map((t) => ({
         name: t.name,

@@ -13,7 +13,7 @@ export const PermissionsSchema = z.object({
 export const ProviderSettingsSchema = z.object({
   id: z.string(),
   name: z.string(),
-  type: z.enum(["copilot", "openai", "google", "ollama", "compatible"]),
+  type: z.enum(["copilot", "openai", "google", "ollama", "compatible", "zhipu", "chatgpt"]),
   baseUrl: z.string().optional(),
   apiKey: z.string().optional(),
   model: z.string().optional(),

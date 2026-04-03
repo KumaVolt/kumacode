@@ -151,3 +151,34 @@ export function deleteSession(id: string): void {
   getDb().run("DELETE FROM messages WHERE session_id = ?", [id])
   getDb().run("DELETE FROM sessions WHERE id = ?", [id])
 }
+
+/**
+ * Update the name of an existing session.
+ */
+export function updateSessionName(id: string, name: string): void {
+  getDb().run("UPDATE sessions SET name = ? WHERE id = ?", [name, id])
+}
+
+/**
+ * Generate a short session name from the first user message.
+ * Strips @file mention blocks, takes first ~50 chars trimmed to a word boundary.
+ */
+export function generateSessionName(firstUserMessage: string): string {
+  // Strip inline file attachment blocks (--- @path --- ... --- end @path ---)
+  let text = firstUserMessage.replace(/\n\n--- @[\s\S]*?--- end @[^\n]* ---/g, "")
+  // Also strip trailing single-line attachment notes
+  text = text.replace(/\n\n--- @[^\n]* ---$/g, "")
+  // Collapse whitespace
+  text = text.replace(/\s+/g, " ").trim()
+
+  if (!text) return "Untitled"
+
+  // Take first 50 characters, trim to last word boundary
+  if (text.length <= 50) return text
+  const truncated = text.slice(0, 50)
+  const lastSpace = truncated.lastIndexOf(" ")
+  if (lastSpace > 20) {
+    return truncated.slice(0, lastSpace) + "..."
+  }
+  return truncated + "..."
+}

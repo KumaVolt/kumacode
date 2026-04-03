@@ -4,6 +4,8 @@ import { Command } from "commander"
 import { render } from "ink"
 import React from "react"
 import { App } from "@kumacode/tui"
+import { KumaCode, bus } from "@kumacode/core"
+import { runConnectWizard } from "./connect.js"
 
 const VERSION = "0.1.0"
 
@@ -23,9 +25,41 @@ const program = new Command()
     const cwd = options.cwd ?? process.cwd()
 
     if (options.print && prompt) {
-      // Non-interactive mode — will be implemented with agent loop
-      console.log("Non-interactive mode not yet implemented")
-      process.exit(0)
+      // Non-interactive mode — auto-approve all tool calls (scripted usage)
+      const kuma = new KumaCode({
+        cwd,
+        model: options.model,
+        permissionMode: options.permissionMode,
+        requestPermission: async () => true,
+      })
+
+      await kuma.init()
+
+      const active = kuma.getActiveModel()
+      if (!active) {
+        console.error("No model configured. Run `kumacode connect` to set one up.")
+        process.exit(1)
+      }
+
+      // Listen for streaming text
+      bus.on("stream:event", (event) => {
+        if (event.type === "text_delta" && event.text) {
+          process.stdout.write(event.text)
+        }
+      })
+
+      try {
+        await kuma.send(prompt)
+        process.stdout.write("\n")
+        process.exit(0)
+      } catch (err) {
+        console.error(
+          "\nError:",
+          err instanceof Error ? err.message : String(err),
+        )
+        process.exit(1)
+      }
+      return
     }
 
     // Interactive TUI mode
@@ -33,6 +67,10 @@ const program = new Command()
       React.createElement(App, {
         cwd,
         initialPrompt: prompt,
+        permissionMode: options.permissionMode,
+        resumeSessionId: options.resume,
+        continueSession: options.continue,
+        modelOverride: options.model,
       }),
     )
 
@@ -44,8 +82,7 @@ program
   .command("connect")
   .description("Configure a model provider")
   .action(async () => {
-    console.log("Connect wizard not yet implemented")
-    // Will be implemented with the /connect flow
+    await runConnectWizard()
   })
 
 program.parse()
