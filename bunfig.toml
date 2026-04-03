@@ -1,0 +1,6 @@
+[install]
+peer = false
+
+[install.scopes]
+# Ensure workspace packages are hoisted
+"@kumacode" = {}
