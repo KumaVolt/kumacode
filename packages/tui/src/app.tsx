@@ -415,6 +415,14 @@ export function App({
       }
     }
 
+    // Bare "exit" / "quit" without slash prefix should also exit
+    const trimmed = text.trim().toLowerCase()
+    if (trimmed === "exit" || trimmed === "quit") {
+      kuma.abort()
+      exit()
+      return
+    }
+
     kuma.send(text)
   }, [kuma, exit])
 

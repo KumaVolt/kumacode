@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+// Set the process title so it shows as "kumacode" in ps/top/title bar, not "bun"
+process.title = "kumacode"
+
 import { Command } from "commander"
 import { render } from "ink"
 import React from "react"
