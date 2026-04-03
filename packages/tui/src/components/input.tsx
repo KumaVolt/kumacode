@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react"
+import React, { useState, useCallback, useMemo, useRef } from "react"
 import { Box, Text, useInput } from "ink"
 import TextInput from "ink-text-input"
 
@@ -19,6 +19,11 @@ export function Input({ onSubmit, disabled = false, commands = [] }: InputProps)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [showAutocomplete, setShowAutocomplete] = useState(false)
 
+  // We need a ref to track autocomplete state synchronously inside handleSubmit,
+  // because React state updates are async and the submit handler fires before
+  // useInput can intercept Enter.
+  const autocompleteRef = useRef({ show: false, matches: [] as SlashCommand[], selectedIndex: 0 })
+
   // Compute matching commands based on current input
   const matches = useMemo(() => {
     if (!value.startsWith("/") || value.includes(" ")) return []
@@ -29,6 +34,9 @@ export function Input({ onSubmit, disabled = false, commands = [] }: InputProps)
 
   const shouldShowAutocomplete = showAutocomplete && matches.length > 0 && !disabled
 
+  // Keep ref in sync
+  autocompleteRef.current = { show: shouldShowAutocomplete, matches, selectedIndex }
+
   const handleChange = useCallback((newValue: string) => {
     setValue(newValue)
     setSelectedIndex(0)
@@ -37,6 +45,21 @@ export function Input({ onSubmit, disabled = false, commands = [] }: InputProps)
 
   const handleSubmit = useCallback((text: string) => {
     if (disabled) return
+
+    // If autocomplete is open, Enter accepts the selected completion
+    const ac = autocompleteRef.current
+    if (ac.show && ac.matches.length > 0) {
+      const selected = ac.matches[ac.selectedIndex]
+      if (selected) {
+        const completed = `/${selected.name} `
+        setValue(completed)
+        setShowAutocomplete(false)
+        setSelectedIndex(0)
+        return // Don't submit — just fill in the completion
+      }
+    }
+
+    // Normal submit
     if (text.trim()) {
       onSubmit(text.trim())
       setValue("")
@@ -45,7 +68,7 @@ export function Input({ onSubmit, disabled = false, commands = [] }: InputProps)
     }
   }, [disabled, onSubmit])
 
-  // Handle arrow keys and tab for autocomplete
+  // Handle arrow keys, tab, and escape for autocomplete navigation
   useInput((input, key) => {
     if (disabled || !shouldShowAutocomplete) return
 
@@ -54,7 +77,7 @@ export function Input({ onSubmit, disabled = false, commands = [] }: InputProps)
     } else if (key.downArrow) {
       setSelectedIndex((prev) => Math.min(matches.length - 1, prev + 1))
     } else if (key.tab && !key.shift) {
-      // Accept the current completion
+      // Tab also accepts the current completion
       if (matches[selectedIndex]) {
         const completed = `/${matches[selectedIndex].name} `
         setValue(completed)
