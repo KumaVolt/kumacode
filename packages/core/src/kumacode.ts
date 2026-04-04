@@ -294,6 +294,11 @@ export class KumaCode {
     return this.permissionMode
   }
 
+  /** Set a specific permission mode */
+  setPermissionMode(mode: PermissionMode): void {
+    this.permissionMode = mode
+  }
+
   /** Get the current session ID */
   getSessionId(): string | null {
     return this.sessionId

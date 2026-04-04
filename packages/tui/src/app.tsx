@@ -5,7 +5,25 @@ import { Chat } from "./components/chat.js"
 import { Input, type SlashCommand } from "./components/input.js"
 import { StatusBar } from "./components/status-bar.js"
 import { PermissionDialog, type PermissionRequest } from "./components/permission-dialog.js"
+import {
+  ModelPicker,
+  ModePicker,
+  SessionPicker,
+  ConnectMenu,
+  MemoryMenu,
+} from "./components/overlays.js"
 import { useKumaCode } from "./hooks/use-kumacode.js"
+
+// ─── Overlay state ──────────────────────────────────────────────────────────
+
+type OverlayState =
+  | { type: "model" }
+  | { type: "mode" }
+  | { type: "sessions" }
+  | { type: "connect" }
+  | { type: "memory" }
+
+// ─── App ────────────────────────────────────────────────────────────────────
 
 interface AppProps {
   cwd: string
@@ -26,6 +44,7 @@ export function App({
 }: AppProps) {
   const { exit } = useApp()
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
+  const [overlay, setOverlay] = useState<OverlayState | null>(null)
 
   const requestPermission = useCallback(
     (toolName: string, input: Record<string, unknown>): Promise<boolean> => {
@@ -76,9 +95,11 @@ export function App({
         exit()
       }
     }
-    // Escape to abort current request or dismiss permission dialog
+    // Escape: dismiss overlay > dismiss permission dialog > abort streaming
     if (key.escape) {
-      if (pendingPermission) {
+      if (overlay) {
+        setOverlay(null)
+      } else if (pendingPermission) {
         pendingPermission.resolve(false)
       } else if (kuma.isStreaming) {
         kuma.abort()
@@ -124,6 +145,81 @@ export function App({
     return kuma.listSessions(5)
   }, [kuma])
 
+  // ─── Overlay callbacks ──────────────────────────────────────────────────
+
+  const dismissOverlay = useCallback(() => setOverlay(null), [])
+
+  const handleModelSelect = useCallback((modelId: string) => {
+    const ok = kuma.setActiveModel(modelId)
+    if (ok) {
+      kuma.addLocalMessage(`Switched to model: ${modelId}`)
+    } else {
+      kuma.addLocalMessage(`Failed to switch to model "${modelId}".`)
+    }
+    setOverlay(null)
+  }, [kuma])
+
+  const handleModeSelect = useCallback((mode: string) => {
+    kuma.setPermissionMode(mode as "default" | "acceptEdits" | "plan")
+    kuma.addLocalMessage(`Permission mode set to: ${mode}`)
+    setOverlay(null)
+  }, [kuma])
+
+  const handleSessionResume = useCallback((sessionId: string) => {
+    const ok = kuma.resumeSession(sessionId)
+    if (ok) {
+      kuma.addLocalMessage(`Resumed session ${sessionId.slice(0, 8)}...`)
+    } else {
+      kuma.addLocalMessage(`Failed to resume session "${sessionId.slice(0, 8)}".`)
+    }
+    setOverlay(null)
+  }, [kuma])
+
+  const handleSessionDelete = useCallback((sessionId: string) => {
+    kuma.deleteSession(sessionId)
+    kuma.addLocalMessage(`Deleted session ${sessionId.slice(0, 8)}...`)
+    setOverlay(null)
+  }, [kuma])
+
+  const handleConnectSelect = useCallback((provider: string) => {
+    kuma.addLocalMessage(
+      `To configure ${provider}, run from your terminal:\n\n  kumacode connect\n\n` +
+      "The setup wizard will guide you through authentication and model selection."
+    )
+    setOverlay(null)
+  }, [kuma])
+
+  const handleMemorySelect = useCallback((action: string) => {
+    setOverlay(null)
+    if (action === "view") {
+      kuma.addLocalMessage(kuma.getMemorySummary())
+    } else if (action === "learn-project") {
+      kuma.addLocalMessage("Extracting learnings from this conversation...")
+      kuma.learnFromConversation("project").then((learnings) => {
+        if (learnings) {
+          kuma.addLocalMessage(`Learned and saved:\n\n${learnings}\n\nSaved to project memory.`)
+        } else {
+          kuma.addLocalMessage("No new learnings extracted from this conversation.")
+        }
+      }).catch((err) => {
+        kuma.addLocalMessage(`Failed to extract learnings: ${err instanceof Error ? err.message : String(err)}`)
+      })
+    } else if (action === "learn-user") {
+      kuma.addLocalMessage("Extracting learnings from this conversation...")
+      kuma.learnFromConversation("user").then((learnings) => {
+        if (learnings) {
+          kuma.addLocalMessage(`Learned and saved:\n\n${learnings}\n\nSaved to user memory.`)
+        } else {
+          kuma.addLocalMessage("No new learnings extracted from this conversation.")
+        }
+      }).catch((err) => {
+        kuma.addLocalMessage(`Failed to extract learnings: ${err instanceof Error ? err.message : String(err)}`)
+      })
+    }
+  }, [kuma])
+
+  // ─── Slash command handler ────────────────────────────────────────────
+
   const handleSubmit = useCallback((text: string) => {
     // Slash commands
     if (text.startsWith("/")) {
@@ -161,18 +257,11 @@ export function App({
           return
         case "model": {
           if (!arg) {
-            const models = kuma.listModels()
-            const active = kuma.model
-            if (models.length === 0) {
-              kuma.addLocalMessage("No models available. Run `kumacode connect` to set up a provider.")
-            } else {
-              const lines = models.map((m) =>
-                `  ${m.model.name === active ? "* " : "  "}${m.model.id} (${m.providerName})`
-              )
-              kuma.addLocalMessage("Available models:\n" + lines.join("\n"))
-            }
+            // Open interactive model picker
+            setOverlay({ type: "model" })
             return
           }
+          // Direct model switch with argument
           const ok = kuma.setActiveModel(arg)
           if (!ok) {
             kuma.addLocalMessage(`Model "${arg}" not found. Use /model to list available models.`)
@@ -182,37 +271,23 @@ export function App({
           return
         }
         case "mode":
-          kuma.cyclePermissionMode()
-          return
-        case "connect": {
-          const models = kuma.listModels()
-          if (models.length === 0) {
-            kuma.addLocalMessage(
-              "No providers configured.\n" +
-              "Run `kumacode connect` from your terminal to set up a provider."
-            )
+          if (!arg) {
+            // Open interactive mode picker
+            setOverlay({ type: "mode" })
+            return
+          }
+          // Direct mode switch if argument is valid
+          if (["default", "acceptEdits", "plan"].includes(arg)) {
+            kuma.setPermissionMode(arg as "default" | "acceptEdits" | "plan")
+            kuma.addLocalMessage(`Permission mode set to: ${arg}`)
           } else {
-            const active = kuma.model
-            const providers = new Map<string, string[]>()
-            for (const m of models) {
-              const list = providers.get(m.providerName) ?? []
-              list.push(`  ${m.model.name === active ? "* " : "  "}${m.model.id}`)
-              providers.set(m.providerName, list)
-            }
-            const lines: string[] = []
-            for (const [provider, modelLines] of providers) {
-              lines.push(`\n  ${provider}:`)
-              lines.push(...modelLines)
-            }
-            kuma.addLocalMessage(
-              "Configured providers and models:" +
-              lines.join("\n") +
-              "\n\nSwitch model: /model <id>\n" +
-              "Add a new provider: run `kumacode connect` from your terminal."
-            )
+            kuma.addLocalMessage(`Unknown mode "${arg}". Valid: default, acceptEdits, plan`)
           }
           return
-        }
+        case "connect":
+          // Open interactive connect menu
+          setOverlay({ type: "connect" })
+          return
         case "compact":
           kuma.compactNow().then((result) => {
             if (result) {
@@ -245,8 +320,8 @@ export function App({
         }
         case "memory": {
           if (!arg) {
-            // Show memory summary
-            kuma.addLocalMessage(kuma.getMemorySummary())
+            // Open interactive memory menu
+            setOverlay({ type: "memory" })
             return
           }
           const [subCmd, ...subArgs] = arg.split(/\s+/)
@@ -278,6 +353,50 @@ export function App({
             "  /memory learn user — save learnings to user memory\n" +
             "  /memory add <text> — manually add a memory entry"
           )
+          return
+        }
+        case "sessions": {
+          if (!arg) {
+            // Open interactive session picker
+            setOverlay({ type: "sessions" })
+            return
+          }
+          const [subCmd, ...subArgs] = arg.split(/\s+/)
+          const targetId = subArgs[0]
+          if (subCmd === "resume" && targetId) {
+            const ok = kuma.resumeSession(targetId)
+            if (ok) {
+              kuma.addLocalMessage(`Resumed session ${targetId.slice(0, 8)}...`)
+            } else {
+              // Try partial ID match
+              const sessions = kuma.listSessions(50)
+              const match = sessions.find((s) => s.id.startsWith(targetId))
+              if (match) {
+                const ok2 = kuma.resumeSession(match.id)
+                if (ok2) {
+                  kuma.addLocalMessage(`Resumed session ${match.id.slice(0, 8)}...`)
+                } else {
+                  kuma.addLocalMessage(`Failed to resume session "${targetId}".`)
+                }
+              } else {
+                kuma.addLocalMessage(`Session "${targetId}" not found. Use /sessions to list.`)
+              }
+            }
+            return
+          }
+          if (subCmd === "delete" && targetId) {
+            // Try exact or partial match
+            const sessions = kuma.listSessions(50)
+            const match = sessions.find((s) => s.id === targetId || s.id.startsWith(targetId))
+            if (match) {
+              kuma.deleteSession(match.id)
+              kuma.addLocalMessage(`Deleted session ${match.id.slice(0, 8)}...`)
+            } else {
+              kuma.addLocalMessage(`Session "${targetId}" not found. Use /sessions to list.`)
+            }
+            return
+          }
+          kuma.addLocalMessage("Usage: /sessions  |  /sessions resume <id>  |  /sessions delete <id>")
           return
         }
         case "skills": {
@@ -329,70 +448,6 @@ export function App({
           })
           return
         }
-        case "sessions": {
-          if (!arg) {
-            // List recent sessions
-            const sessions = kuma.listSessions(10)
-            if (sessions.length === 0) {
-              kuma.addLocalMessage("No saved sessions found.")
-            } else {
-              const lines = sessions.map((s) => {
-                const date = new Date(s.updatedAt).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-                const name = s.name ?? "(unnamed)"
-                const shortId = s.id.slice(0, 8)
-                return `  ${shortId}  ${date}  ${s.messageCount} msgs  ${s.model}  ${name}`
-              })
-              kuma.addLocalMessage(
-                "Recent sessions:\n" +
-                lines.join("\n") +
-                "\n\nUsage: /sessions resume <id>  |  /sessions delete <id>"
-              )
-            }
-            return
-          }
-          const [subCmd, ...subArgs] = arg.split(/\s+/)
-          const targetId = subArgs[0]
-          if (subCmd === "resume" && targetId) {
-            const ok = kuma.resumeSession(targetId)
-            if (ok) {
-              kuma.addLocalMessage(`Resumed session ${targetId.slice(0, 8)}...`)
-            } else {
-              // Try partial ID match
-              const sessions = kuma.listSessions(50)
-              const match = sessions.find((s) => s.id.startsWith(targetId))
-              if (match) {
-                const ok2 = kuma.resumeSession(match.id)
-                if (ok2) {
-                  kuma.addLocalMessage(`Resumed session ${match.id.slice(0, 8)}...`)
-                } else {
-                  kuma.addLocalMessage(`Failed to resume session "${targetId}".`)
-                }
-              } else {
-                kuma.addLocalMessage(`Session "${targetId}" not found. Use /sessions to list.`)
-              }
-            }
-            return
-          }
-          if (subCmd === "delete" && targetId) {
-            // Try exact or partial match
-            const sessions = kuma.listSessions(50)
-            const match = sessions.find((s) => s.id === targetId || s.id.startsWith(targetId))
-            if (match) {
-              kuma.deleteSession(match.id)
-              kuma.addLocalMessage(`Deleted session ${match.id.slice(0, 8)}...`)
-            } else {
-              kuma.addLocalMessage(`Session "${targetId}" not found. Use /sessions to list.`)
-            }
-            return
-          }
-          kuma.addLocalMessage("Usage: /sessions  |  /sessions resume <id>  |  /sessions delete <id>")
-          return
-        }
         case "quit":
         case "exit":
           kuma.abort()
@@ -426,8 +481,78 @@ export function App({
     kuma.send(text)
   }, [kuma, exit])
 
+  // ─── Overlay data ─────────────────────────────────────────────────────
+
+  // Build connect menu provider data
+  const connectProviders = useMemo(() => {
+    const models = kuma.listModels()
+    const providerMap = new Map<string, string[]>()
+    for (const m of models) {
+      const list = providerMap.get(m.providerName) ?? []
+      list.push(m.model.id)
+      providerMap.set(m.providerName, list)
+    }
+    return Array.from(providerMap.entries()).map(([providerName, modelIds]) => ({
+      providerName,
+      models: modelIds,
+    }))
+  }, [kuma])
+
   const hasMessages = kuma.messages.length > 0
   const hasActiveSubagent = kuma.subagentActivities.some((a) => a.status === "running")
+  const isInputDisabled = kuma.isStreaming || !!pendingPermission || !!overlay
+
+  // ─── Render overlay ───────────────────────────────────────────────────
+
+  const renderOverlay = () => {
+    if (!overlay) return null
+
+    switch (overlay.type) {
+      case "model":
+        return (
+          <ModelPicker
+            models={kuma.listModels()}
+            activeModel={kuma.model}
+            onSelect={handleModelSelect}
+            onCancel={dismissOverlay}
+          />
+        )
+      case "mode":
+        return (
+          <ModePicker
+            currentMode={kuma.permissionMode}
+            onSelect={handleModeSelect}
+            onCancel={dismissOverlay}
+          />
+        )
+      case "sessions":
+        return (
+          <SessionPicker
+            sessions={kuma.listSessions(20)}
+            onResume={handleSessionResume}
+            onDelete={handleSessionDelete}
+            onCancel={dismissOverlay}
+          />
+        )
+      case "connect":
+        return (
+          <ConnectMenu
+            currentProviders={connectProviders}
+            onSelect={handleConnectSelect}
+            onCancel={dismissOverlay}
+          />
+        )
+      case "memory":
+        return (
+          <MemoryMenu
+            onSelect={handleMemorySelect}
+            onCancel={dismissOverlay}
+          />
+        )
+      default:
+        return null
+    }
+  }
 
   return (
     <Box flexDirection="column" width="100%">
@@ -451,9 +576,10 @@ export function App({
       {pendingPermission && (
         <PermissionDialog request={pendingPermission} />
       )}
+      {renderOverlay()}
       <Input
         onSubmit={handleSubmit}
-        disabled={kuma.isStreaming || !!pendingPermission}
+        disabled={isInputDisabled}
         commands={slashCommands}
       />
       <StatusBar

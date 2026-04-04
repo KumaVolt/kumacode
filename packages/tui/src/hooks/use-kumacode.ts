@@ -352,6 +352,12 @@ export function useKumaCode(options: KumaCodeOptions) {
     setPermissionMode(next)
   }, [])
 
+  const setPermissionModeTo = useCallback((mode: PermissionMode) => {
+    if (!kumaRef.current) return
+    kumaRef.current.setPermissionMode(mode)
+    setPermissionMode(mode)
+  }, [])
+
   const clearMessages = useCallback(() => {
     if (!kumaRef.current) return
     kumaRef.current.clearMessages()
@@ -487,6 +493,7 @@ export function useKumaCode(options: KumaCodeOptions) {
     sendWithBlocks,
     abort,
     cyclePermissionMode,
+    setPermissionMode: setPermissionModeTo,
     clearMessages,
     listModels,
     setActiveModel,
